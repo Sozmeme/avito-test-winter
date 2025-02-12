@@ -1,0 +1,265 @@
+---
+swagger: "2.0"
+info:
+  version: "1.0.0"
+  title: "API Avito shop"
+host: "localhost:8080"
+basePath: "/"
+schemes:
+- "http"
+paths:
+  /api/info:
+    get:
+      summary: "Получить информацию о монетах, инвентаре и истории транзакций."
+      produces:
+      - "application/json"
+      parameters: []
+      security:
+      - BearerAuth: []
+      responses:
+        "200":
+          description: "Успешный ответ."
+          schema:
+            $ref: "#/definitions/InfoResponse"
+        "400":
+          description: "Неверный запрос."
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+        "401":
+          description: "Неавторизован."
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+        "500":
+          description: "Внутренняя ошибка сервера."
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+  /api/sendCoin:
+    post:
+      summary: "Отправить монеты другому пользователю."
+      consumes:
+      - "application/json"
+      produces:
+      - "application/json"
+      parameters:
+      - in: "body"
+        name: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/SendCoinRequest"
+        x-exportParamName: "Body"
+      security:
+      - BearerAuth: []
+      responses:
+        "200":
+          description: "Успешный ответ."
+        "400":
+          description: "Неверный запрос."
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+        "401":
+          description: "Неавторизован."
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+        "500":
+          description: "Внутренняя ошибка сервера."
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+  /api/buy/{item}:
+    get:
+      summary: "Купить предмет за монеты."
+      produces:
+      - "application/json"
+      parameters:
+      - name: "item"
+        in: "path"
+        required: true
+        type: "string"
+        x-exportParamName: "Item"
+      security:
+      - BearerAuth: []
+      responses:
+        "200":
+          description: "Успешный ответ."
+        "400":
+          description: "Неверный запрос."
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+        "401":
+          description: "Неавторизован."
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+        "500":
+          description: "Внутренняя ошибка сервера."
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+  /api/auth:
+    post:
+      summary: "Аутентификация и получение JWT-токена."
+      consumes:
+      - "application/json"
+      produces:
+      - "application/json"
+      parameters:
+      - in: "body"
+        name: "body"
+        required: true
+        schema:
+          $ref: "#/definitions/AuthRequest"
+        x-exportParamName: "Body"
+      responses:
+        "200":
+          description: "Успешная аутентификация."
+          schema:
+            $ref: "#/definitions/AuthResponse"
+        "400":
+          description: "Неверный запрос."
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+        "401":
+          description: "Неавторизован."
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+        "500":
+          description: "Внутренняя ошибка сервера."
+          schema:
+            $ref: "#/definitions/ErrorResponse"
+securityDefinitions:
+  BearerAuth:
+    type: "apiKey"
+    name: "Authorization"
+    in: "header"
+definitions:
+  InfoResponse:
+    type: "object"
+    properties:
+      coins:
+        type: "integer"
+        description: "Количество доступных монет."
+      inventory:
+        type: "array"
+        items:
+          $ref: "#/definitions/InfoResponse_inventory"
+      coinHistory:
+        $ref: "#/definitions/InfoResponse_coinHistory"
+    example:
+      coins: 0
+      coinHistory:
+        received:
+        - amount: 1
+          fromUser: "fromUser"
+        - amount: 1
+          fromUser: "fromUser"
+        sent:
+        - toUser: "toUser"
+          amount: 5
+        - toUser: "toUser"
+          amount: 5
+      inventory:
+      - quantity: 6
+        type: "type"
+      - quantity: 6
+        type: "type"
+  ErrorResponse:
+    type: "object"
+    properties:
+      errors:
+        type: "string"
+        description: "Сообщение об ошибке, описывающее проблему."
+  AuthRequest:
+    type: "object"
+    required:
+    - "password"
+    - "username"
+    properties:
+      username:
+        type: "string"
+        description: "Имя пользователя для аутентификации."
+      password:
+        type: "string"
+        format: "password"
+        description: "Пароль для аутентификации."
+    example:
+      password: "password"
+      username: "username"
+  AuthResponse:
+    type: "object"
+    properties:
+      token:
+        type: "string"
+        description: "JWT-токен для доступа к защищенным ресурсам."
+    example:
+      token: "token"
+  SendCoinRequest:
+    type: "object"
+    required:
+    - "amount"
+    - "toUser"
+    properties:
+      toUser:
+        type: "string"
+        description: "Имя пользователя, которому нужно отправить монеты."
+      amount:
+        type: "integer"
+        description: "Количество монет, которые необходимо отправить."
+    example:
+      toUser: "toUser"
+      amount: 0
+  InfoResponse_inventory:
+    type: "object"
+    properties:
+      type:
+        type: "string"
+        description: "Тип предмета."
+      quantity:
+        type: "integer"
+        description: "Количество предметов."
+    example:
+      quantity: 6
+      type: "type"
+  InfoResponse_coinHistory_received:
+    type: "object"
+    properties:
+      fromUser:
+        type: "string"
+        description: "Имя пользователя, который отправил монеты."
+      amount:
+        type: "integer"
+        description: "Количество полученных монет."
+    example:
+      amount: 1
+      fromUser: "fromUser"
+  InfoResponse_coinHistory_sent:
+    type: "object"
+    properties:
+      toUser:
+        type: "string"
+        description: "Имя пользователя, которому отправлены монеты."
+      amount:
+        type: "integer"
+        description: "Количество отправленных монет."
+    example:
+      toUser: "toUser"
+      amount: 5
+  InfoResponse_coinHistory:
+    type: "object"
+    properties:
+      received:
+        type: "array"
+        items:
+          $ref: "#/definitions/InfoResponse_coinHistory_received"
+      sent:
+        type: "array"
+        items:
+          $ref: "#/definitions/InfoResponse_coinHistory_sent"
+    example:
+      received:
+      - amount: 1
+        fromUser: "fromUser"
+      - amount: 1
+        fromUser: "fromUser"
+      sent:
+      - toUser: "toUser"
+        amount: 5
+      - toUser: "toUser"
+        amount: 5
+x-components: {}
