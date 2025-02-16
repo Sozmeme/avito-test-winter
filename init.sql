@@ -19,3 +19,6 @@ CREATE TABLE transactions (
     amount INT NOT NULL,
     created_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_purchases_user_id ON purchases(user_id);

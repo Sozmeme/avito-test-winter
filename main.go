@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -22,6 +23,31 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+var tokenCache sync.Map // Кэш для хранения проверенных токенов
+
+// Функция для проверки токена с использованием кэша
+func validateToken(tokenString string) (*Claims, error) {
+	// Проверяем, есть ли токен в кэше
+	if claims, ok := tokenCache.Load(tokenString); ok {
+		return claims.(*Claims), nil
+	}
+
+	// Если токена нет в кэше, проверяем его стандартным способом
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return jwtKey, nil
+	})
+
+	if err != nil || !token.Valid {
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	// Сохраняем токен в кэше
+	tokenCache.Store(tokenString, claims)
+
+	return claims, nil
+}
+
 func ApiAuthPost(w http.ResponseWriter, r *http.Request) {
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -29,13 +55,11 @@ func ApiAuthPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Проверка, что username и password не пустые
 	if req.Username == "" || req.Password == "" {
 		respondWithError(w, http.StatusBadRequest, "Username and password are required")
 		return
 	}
 
-	// Проверка, существует ли пользователь
 	var userID int
 	var storedPassword string
 	err := db.QueryRow("SELECT id, password FROM users WHERE username = $1", req.Username).Scan(&userID, &storedPassword)
@@ -74,21 +98,20 @@ func ApiAuthPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Отправка токена клиенту
 	respondWithJSON(w, http.StatusOK, AuthResponse{Token: tokenString})
 }
 
 var itemPrices = map[string]int{
-	"t-shirt":    80,
-	"cup":        20,
-	"book":       50,
-	"pen":        10,
-	"powerbank":  200,
-	"hoody":      300,
-	"umbrella":   200,
-	"socks":      10,
-	"wallet":     50,
-	"pink-hoody": 500,
+	"t-shirt":    0,
+	"cup":        0,
+	"book":       0,
+	"pen":        0,
+	"powerbank":  0,
+	"hoody":      0,
+	"umbrella":   0,
+	"socks":      0,
+	"wallet":     0,
+	"pink-hoody": 0,
 }
 
 func ApiBuyItemGet(w http.ResponseWriter, r *http.Request) {
@@ -99,22 +122,8 @@ func ApiBuyItemGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Парсинг токена
-	claims := &Claims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		return jwtKey, nil
-	})
-
+	claims, err := validateToken(tokenString)
 	if err != nil {
-		if err == jwt.ErrSignatureInvalid {
-			respondWithError(w, http.StatusUnauthorized, "Invalid token signature")
-			return
-		}
-		respondWithError(w, http.StatusBadRequest, "Invalid token")
-		return
-	}
-
-	if !token.Valid {
 		respondWithError(w, http.StatusUnauthorized, "Invalid token")
 		return
 	}
@@ -152,29 +161,39 @@ func ApiBuyItemGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Списываем монеты с баланса пользователя
-	_, err = tx.Exec("UPDATE users SET coins = coins - $1 WHERE id = $2", itemPrice, userID)
-	if err != nil {
-		tx.Rollback()
-		respondWithError(w, http.StatusInternalServerError, "Failed to update balance")
-		return
-	}
+	// Выполняем операции в отдельной горутине
+	done := make(chan bool)
+	go func() {
+		// Списываем монеты с баланса пользователя
+		_, err = tx.Exec("UPDATE users SET coins = coins - $1 WHERE id = $2", itemPrice, userID)
+		if err != nil {
+			tx.Rollback()
+			respondWithError(w, http.StatusInternalServerError, "Failed to update balance")
+			close(done)
+			return
+		}
 
-	// Добавляем запись о покупке
-	_, err = tx.Exec("INSERT INTO purchases (user_id, item_name) VALUES ($1, $2)", userID, itemName)
-	if err != nil {
-		tx.Rollback()
-		respondWithError(w, http.StatusInternalServerError, "Failed to record purchase")
-		return
-	}
+		// Добавляем запись о покупке
+		_, err = tx.Exec("INSERT INTO purchases (user_id, item_name) VALUES ($1, $2)", userID, itemName)
+		if err != nil {
+			tx.Rollback()
+			respondWithError(w, http.StatusInternalServerError, "Failed to record purchase")
+			close(done)
+			return
+		}
 
-	// Завершаем транзакцию
-	err = tx.Commit()
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to commit transaction")
-		return
-	}
+		// Завершаем транзакцию
+		err = tx.Commit()
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to commit transaction")
+			close(done)
+			return
+		}
 
+		close(done)
+	}()
+
+	<-done // Ждём завершения операций
 	// Возвращаем успешный ответ
 	respondWithJSON(w, http.StatusOK, map[string]string{"message": fmt.Sprintf("You bought a %s!", itemName)})
 }
@@ -187,13 +206,8 @@ func ApiInfoGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Парсинг токена
-	claims := &Claims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		return jwtKey, nil
-	})
-
-	if err != nil || !token.Valid {
+	claims, err := validateToken(tokenString)
+	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Invalid token")
 		return
 	}
@@ -207,86 +221,107 @@ func ApiInfoGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем инвентарь пользователя (купленные товары)
-	var inventory []InfoResponseInventory
-	rows, err := db.Query("SELECT item_name, COUNT(*) as quantity FROM purchases WHERE user_id = $1 GROUP BY item_name", userID)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to fetch inventory")
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var itemName string
-		var quantity int32
-		err := rows.Scan(&itemName, &quantity)
+	// Получаем инвентарь пользователя
+	inventoryChan := make(chan []InfoResponseInventory, 1)
+	go func() {
+		var inventory []InfoResponseInventory
+		rows, err := db.Query("SELECT item_name, COUNT(*) as quantity FROM purchases WHERE user_id = $1 GROUP BY item_name", userID)
 		if err != nil {
-			respondWithError(w, http.StatusInternalServerError, "Failed to scan inventory")
+			respondWithError(w, http.StatusInternalServerError, "Failed to fetch inventory")
+			close(inventoryChan)
 			return
 		}
-		inventory = append(inventory, InfoResponseInventory{
-			Type_:    itemName,
-			Quantity: quantity,
-		})
-	}
+		defer rows.Close()
+
+		for rows.Next() {
+			var itemName string
+			var quantity int32
+			err := rows.Scan(&itemName, &quantity)
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError, "Failed to scan inventory")
+				close(inventoryChan)
+				return
+			}
+			inventory = append(inventory, InfoResponseInventory{
+				Type_:    itemName,
+				Quantity: quantity,
+			})
+		}
+		inventoryChan <- inventory
+	}()
 
 	// Получаем историю полученных монет
-	var received []InfoResponseCoinHistoryReceived
-	rows, err = db.Query(`
-		SELECT u.username, t.amount 
-		FROM transactions t 
-		JOIN users u ON t.sender_id = u.id 
-		WHERE t.receiver_id = $1
-	`, userID)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to fetch received transactions")
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var fromUser string
-		var amount int32
-		err := rows.Scan(&fromUser, &amount)
+	receivedChan := make(chan []InfoResponseCoinHistoryReceived, 1)
+	go func() {
+		var received []InfoResponseCoinHistoryReceived
+		rows, err := db.Query(`
+            SELECT u.username, t.amount 
+            FROM transactions t 
+            JOIN users u ON t.sender_id = u.id 
+            WHERE t.receiver_id = $1
+        `, userID)
 		if err != nil {
-			respondWithError(w, http.StatusInternalServerError, "Failed to scan received transaction")
+			respondWithError(w, http.StatusInternalServerError, "Failed to fetch received transactions")
+			close(receivedChan)
 			return
 		}
-		received = append(received, InfoResponseCoinHistoryReceived{
-			FromUser: fromUser,
-			Amount:   amount,
-		})
-	}
+		defer rows.Close()
+
+		for rows.Next() {
+			var fromUser string
+			var amount int32
+			err := rows.Scan(&fromUser, &amount)
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError, "Failed to scan received transaction")
+				close(receivedChan)
+				return
+			}
+			received = append(received, InfoResponseCoinHistoryReceived{
+				FromUser: fromUser,
+				Amount:   amount,
+			})
+		}
+		receivedChan <- received
+	}()
 
 	// Получаем историю отправленных монет
-	var sent []InfoResponseCoinHistorySent
-	rows, err = db.Query(`
-		SELECT u.username, t.amount 
-		FROM transactions t 
-		JOIN users u ON t.receiver_id = u.id 
-		WHERE t.sender_id = $1
-	`, userID)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to fetch sent transactions")
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var toUser string
-		var amount int32
-		err := rows.Scan(&toUser, &amount)
+	sentChan := make(chan []InfoResponseCoinHistorySent, 1)
+	go func() {
+		var sent []InfoResponseCoinHistorySent
+		rows, err := db.Query(`
+            SELECT u.username, t.amount 
+            FROM transactions t 
+            JOIN users u ON t.receiver_id = u.id 
+            WHERE t.sender_id = $1
+        `, userID)
 		if err != nil {
-			respondWithError(w, http.StatusInternalServerError, "Failed to scan sent transaction")
+			respondWithError(w, http.StatusInternalServerError, "Failed to fetch sent transactions")
+			close(sentChan)
 			return
 		}
-		sent = append(sent, InfoResponseCoinHistorySent{
-			ToUser: toUser,
-			Amount: amount,
-		})
-	}
+		defer rows.Close()
 
-	// Формируем ответ
+		for rows.Next() {
+			var toUser string
+			var amount int32
+			err := rows.Scan(&toUser, &amount)
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError, "Failed to scan sent transaction")
+				close(sentChan)
+				return
+			}
+			sent = append(sent, InfoResponseCoinHistorySent{
+				ToUser: toUser,
+				Amount: amount,
+			})
+		}
+		sentChan <- sent
+	}()
+
+	inventory := <-inventoryChan
+	received := <-receivedChan
+	sent := <-sentChan
+
 	response := InfoResponse{
 		Coins:     coins,
 		Inventory: inventory,
@@ -296,7 +331,6 @@ func ApiInfoGet(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	// Возвращаем информацию
 	respondWithJSON(w, http.StatusOK, response)
 }
 
@@ -308,13 +342,8 @@ func ApiSendCoinPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Парсинг токена
-	claims := &Claims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		return jwtKey, nil
-	})
-
-	if err != nil || !token.Valid {
+	claims, err := validateToken(tokenString)
+	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Invalid token")
 		return
 	}
@@ -372,49 +401,57 @@ func ApiSendCoinPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Списываем монеты с отправителя
-	_, err = tx.Exec("UPDATE users SET coins = coins - $1 WHERE id = $2", req.Amount, senderID)
-	if err != nil {
-		tx.Rollback()
-		respondWithError(w, http.StatusInternalServerError, "Failed to update sender balance")
-		return
-	}
+	done := make(chan bool)
+	go func() {
+		// Списываем монеты с отправителя
+		_, err = tx.Exec("UPDATE users SET coins = coins - $1 WHERE id = $2", req.Amount, senderID)
+		if err != nil {
+			tx.Rollback()
+			respondWithError(w, http.StatusInternalServerError, "Failed to update sender balance")
+			close(done)
+			return
+		}
 
-	// Добавляем монеты получателю
-	_, err = tx.Exec("UPDATE users SET coins = coins + $1 WHERE id = $2", req.Amount, receiverID)
-	if err != nil {
-		tx.Rollback()
-		respondWithError(w, http.StatusInternalServerError, "Failed to update receiver balance")
-		return
-	}
+		// Добавляем монеты получателю
+		_, err = tx.Exec("UPDATE users SET coins = coins + $1 WHERE id = $2", req.Amount, receiverID)
+		if err != nil {
+			tx.Rollback()
+			respondWithError(w, http.StatusInternalServerError, "Failed to update receiver balance")
+			close(done)
+			return
+		}
 
-	// Записываем транзакцию
-	_, err = tx.Exec("INSERT INTO transactions (sender_id, receiver_id, amount) VALUES ($1, $2, $3)", senderID, receiverID, req.Amount)
-	if err != nil {
-		tx.Rollback()
-		respondWithError(w, http.StatusInternalServerError, "Failed to record transaction")
-		return
-	}
+		// Записываем транзакцию
+		_, err = tx.Exec("INSERT INTO transactions (sender_id, receiver_id, amount) VALUES ($1, $2, $3)", senderID, receiverID, req.Amount)
+		if err != nil {
+			tx.Rollback()
+			respondWithError(w, http.StatusInternalServerError, "Failed to record transaction")
+			close(done)
+			return
+		}
 
-	// Завершаем транзакцию
-	err = tx.Commit()
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to commit transaction")
-		return
-	}
+		// Завершаем транзакцию
+		err = tx.Commit()
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to commit transaction")
+			close(done)
+			return
+		}
 
-	// Возвращаем успешный ответ
+		close(done)
+	}()
+
+	<-done
+
 	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Coins sent successfully"})
 }
 
-// Helper function to send JSON responses
 func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(payload)
 }
 
-// Helper function to send error responses
 func respondWithError(w http.ResponseWriter, statusCode int, message string) {
 	respondWithJSON(w, statusCode, ErrorResponse{Errors: message})
 }
@@ -423,7 +460,6 @@ var db *sql.DB
 
 func initdb() (*sql.DB, error) {
 	time.Sleep(1 * time.Second)
-	// Формируем строку подключения
 	connStr := fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		os.Getenv("DB_HOST"),
@@ -433,13 +469,14 @@ func initdb() (*sql.DB, error) {
 		os.Getenv("DB_NAME"),
 	)
 
-	// Подключаемся к базе данных
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Проверяем подключение
+	db.SetMaxOpenConns(100)
+	db.SetMaxIdleConns(10)
+
 	err = db.Ping()
 	if err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
@@ -479,7 +516,6 @@ func NewRouter() *mux.Router {
 	for _, route := range routes {
 		var handler http.Handler
 		handler = route.HandlerFunc
-		handler = Logger(handler, route.Name)
 
 		router.
 			Methods(route.Method).
@@ -530,22 +566,6 @@ var routes = Routes{
 		"/api/sendCoin",
 		ApiSendCoinPost,
 	},
-}
-
-func Logger(inner http.Handler, name string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-
-		inner.ServeHTTP(w, r)
-
-		log.Printf(
-			"%s %s %s %s",
-			r.Method,
-			r.RequestURI,
-			name,
-			time.Since(start),
-		)
-	})
 }
 
 type AuthRequest struct {

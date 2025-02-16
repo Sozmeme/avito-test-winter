@@ -27,7 +27,6 @@ func setupTestEnvironment(t *testing.T) {
 	}
 }
 
-// Функция для очистки переменных окружения после тестов (опционально)
 func cleanupTestEnvironment(t *testing.T) {
 	os.Unsetenv("DB_HOST")
 	os.Unsetenv("DB_PORT")
@@ -35,7 +34,6 @@ func cleanupTestEnvironment(t *testing.T) {
 	os.Unsetenv("DB_PASSWORD")
 	os.Unsetenv("DB_NAME")
 
-	// Удаление таблиц
 	_, err := db.Exec("DELETE FROM transactions")
 	if err != nil {
 		t.Fatalf("Ошибка при очистке данных из таблицы transactions: %v", err)
@@ -52,7 +50,6 @@ func cleanupTestEnvironment(t *testing.T) {
 	}
 }
 
-// Функция для выполнения HTTP-запроса
 func performRequest(r http.Handler, method, path string, body interface{}) *httptest.ResponseRecorder {
 	var buf *bytes.Buffer
 	if body != nil {
@@ -234,14 +231,6 @@ func TestApiSendCoinPost(t *testing.T) {
 	assert.Equal(t, expectedMessage, responseMap["message"], "Неверное сообщение об успехе")
 }
 
-// Функция для очистки данных после тестов
-func cleanupTestData(t *testing.T) {
-	_, err := db.Exec("DELETE FROM users WHERE username IN ('testuser', 'testuser1', 'testuser2')")
-	if err != nil {
-		t.Fatalf("Ошибка при удалении тестовых данных: %v", err)
-	}
-}
-
 func TestSendCoins_HappyPath(t *testing.T) {
 	setupTestEnvironment(t)
 	defer cleanupTestEnvironment(t)
@@ -299,12 +288,12 @@ func TestSendCoins_HappyPath(t *testing.T) {
 		t.Fatalf("Неверный баланс user1 после отправки монет: %v", err)
 	}
 
-	 // Проверяем баланс user2 после получения монет
-	 var updatedCoinsUser2 int
-	 err = db.QueryRow("SELECT coins FROM users WHERE username = $1", "user2").Scan(&updatedCoinsUser2)
-	 if err != nil || updatedCoinsUser2 != 1100 {
-		 t.Fatalf("Неверный баланс user2 после получения монет: %v", err)
-	 }
+	// Проверяем баланс user2 после получения монет
+	var updatedCoinsUser2 int
+	err = db.QueryRow("SELECT coins FROM users WHERE username = $1", "user2").Scan(&updatedCoinsUser2)
+	if err != nil || updatedCoinsUser2 != 1100 {
+		t.Fatalf("Неверный баланс user2 после получения монет: %v", err)
+	}
 }
 
 func TestSendCoins_NegativePath(t *testing.T) {
@@ -367,12 +356,6 @@ func TestBuyMerch_HappyPath(t *testing.T) {
 
 	router := NewRouter()
 
-	// Создаем пользователя
-	_, err := db.Exec("INSERT INTO users (username, password, coins) VALUES ($1, $2, $3)", "user1", "password1", 1000)
-	if err != nil {
-		t.Fatalf("Не удалось создать пользователя user1: %v", err)
-	}
-
 	// Авторизуемся как user1
 	authRequest := AuthRequest{
 		Username: "user1",
@@ -380,7 +363,7 @@ func TestBuyMerch_HappyPath(t *testing.T) {
 	}
 	authRecorder := performRequest(router, "POST", "/api/auth", authRequest)
 	var authResponse AuthResponse
-	err = json.Unmarshal(authRecorder.Body.Bytes(), &authResponse)
+	err := json.Unmarshal(authRecorder.Body.Bytes(), &authResponse)
 	if err != nil {
 		t.Fatalf("Ошибка при парсинге JSON: %v", err)
 	}
