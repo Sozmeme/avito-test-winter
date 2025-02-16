@@ -102,16 +102,16 @@ func ApiAuthPost(w http.ResponseWriter, r *http.Request) {
 }
 
 var itemPrices = map[string]int{
-	"t-shirt":    0,
-	"cup":        0,
-	"book":       0,
-	"pen":        0,
-	"powerbank":  0,
-	"hoody":      0,
-	"umbrella":   0,
-	"socks":      0,
-	"wallet":     0,
-	"pink-hoody": 0,
+	"t-shirt":    80,
+	"cup":        20,
+	"book":       50,
+	"pen":        10,
+	"powerbank":  200,
+	"hoody":      300,
+	"umbrella":   200,
+	"socks":      10,
+	"wallet":     50,
+	"pink-hoody": 500,
 }
 
 func ApiBuyItemGet(w http.ResponseWriter, r *http.Request) {
@@ -356,7 +356,7 @@ func ApiSendCoinPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Проверяем, что сумма положительная
-	if req.Amount < 0 {
+	if req.Amount <= 0 {
 		respondWithError(w, http.StatusBadRequest, "Amount must be positive")
 		return
 	}
