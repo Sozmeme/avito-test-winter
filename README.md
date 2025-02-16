@@ -12,6 +12,27 @@ docker-compose up --build
 ```sh
 go test -v
 ```
+### Примеры использования API
+
+#### Аутентификация
+```sh
+curl -X POST http://localhost:8080/api/auth -H "Content-Type: application/json" -d "{\"username\":\"testuser\",\"password\":\"testpass\"}"
+```
+
+#### Покупка товара
+```sh
+curl -X GET http://localhost:8080/api/buy/pink-hoody -H "Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InRlc3R1c2VyIiwiZXhwIjoxNzM5NTQ5NTc1fQ.Qb8qvOCCAyjWEqwiiWC4C4E0UyTAEq76bOekmYnYea4"
+```
+
+#### Получение информации
+```sh
+curl -X GET http://localhost:8080/api/info -H "Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InRlc3R1c2VyIiwiZXhwIjoxNzM5NTQ5NTc1fQ.Qb8qvOCCAyjWEqwiiWC4C4E0UyTAEq76bOekmYnYea4"
+```
+
+#### Перевод монет
+```sh
+curl -X POST http://localhost:8080/api/sendCoin -H "Content-Type: application/json" -H "Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InRlc3R1c2VyIiwiZXhwIjoxNzM5NDYzOTIyfQ.w2LSqp6EdV8Z0NZWdb0T_RDDrNU2_kcEhaWzhabggzg" -d "{\"toUser\":\"anotheruser\",\"amount\":50}"
+```
 
 ## Вопросы и ответы
 
